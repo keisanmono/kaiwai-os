@@ -1,0 +1,34 @@
+# C/C++ build artifacts
+*.o
+*.a
+*.so
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.dump
+*.img
+*.iso
+build/
+out/
+dist/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.cache/
+tmp/
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.code-workspace
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
