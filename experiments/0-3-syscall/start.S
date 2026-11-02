@@ -23,9 +23,18 @@ _start:
     li      t0, 0x0f
     csrw    pmpcfg0, t0
 
-    # Delegate illegal instruction and U-mode ecall
+    # Delegate exceptions to S-mode
+    # Bit 2: Illegal instruction
+    # Bit 8: U-mode ecall
     li      t0, 0x104
     csrw    medeleg, t0
+
+    # Delegate supervisor interrupts
+    # Bit 1: Supervisor software interrupt
+    # Bit 5: Supervisor timer interrupt
+    # Bit 9: Supervisor external interrupt
+    li      t0, 0x222
+    csrs    mideleg, t0
 
     # Enter Supervisor mode
     mret
@@ -88,7 +97,6 @@ user_entry:
     mv      s1, a0
 
 user_halt:
-    # Normal user-mode halt loop
     j       user_halt
 
 
