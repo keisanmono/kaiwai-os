@@ -55,7 +55,12 @@ static void finish(int error)
     for (;;) __asm__ volatile ("wfi");
 }
 
-/* 内核态致命异常诊断函数（对应 start.S 的 .Lkernel_trap） */
+/*
+ * 内核态致命异常诊断函数（对应 start.S 的 .Lkernel_trap）：
+ * 打印 scause、sepc、stval 后调用 finish(1) 结束运行。
+ *
+ * TODO: 在这里实现内核异常信息输出与错误退出。
+ */
 void kernel_trap(u64 cause, u64 pc, u64 value) __attribute__((noreturn));
 void kernel_trap(u64 cause, u64 pc, u64 value)
 {
@@ -160,7 +165,13 @@ struct trap_frame *handle_trap(struct trap_frame *frame, u64 cause, u64 value)
     }
 }
 
-/* C 内核入口：初始化 alpha 和 beta 两个任务，并调用 enter_user() 启动首个任务 */
+/*
+ * C 内核入口（部门经理正式上岗）：
+ * 打印启动横幅，办理 alpha 和 beta 两个打工人的入职初始化，
+ * 将 0 号员工 alpha 设为 RUNNING 并调用 enter_user() 送入 U 态开始执行。
+ *
+ * TODO: 在这里完成双进程初始化并启动首个用户任务。
+ */
 void kernel_main(void)
 {
     puts_raw("kaiwai-os lab 0-4 | Wang Yunyu | 24281239\n");

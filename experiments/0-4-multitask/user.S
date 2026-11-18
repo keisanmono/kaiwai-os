@@ -73,8 +73,11 @@ user_beta:
     ecall
     j       context_failure
 
+# 上下文校验失败处理分支（context_failure）：
+# 若寄存器或栈校验失败，输出报错信息并以退出码 1 调用 exit(1) 结束。
+#
+# TODO: 在这里实现校验失败报错退出分支。
 context_failure:
-    # 若寄存器或栈校验失败，输出报错信息并以退出码 1 结束。
     PUTS    failed_message
     li      a0, 1
     li      a7, 4

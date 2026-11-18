@@ -6,15 +6,19 @@
 #   3. 陷入与任务切换：trap_entry 将当前员工现场存进 272 字节储物柜，
 #      根据 handle_trap() 返回的新储物柜指针把 sp 切换过去，再执行 restore_user 恢复并 sret。
 
+# M 态大老板开机初始化（_start）：
+# 1. 仅放行 hart 0，其余核心进入 .Lpark 等待；
+# 2. 设置 boot_stack_top 并将 __bss_start ~ __bss_end 清零（开机大扫除，避免全局变量与初始帧残留脏数据）；
+# 3. 配置 PMP 全物理地址门禁卡（pmpaddr0=-1, pmpcfg0=0x0f）与同步异常委派 medeleg=0xb1ff；
+# 4. 设置 MPP=01 (S-mode) 与 mepc=supervisor_entry，执行 mret 切入 S 态部门经理。
+#
+# TODO: 在这里实现 _start 启动初始化、BSS 清零、PMP/medeleg 配置与 mret 降权。
 _start:
-    # 仅让 hart 0 执行初始化，其余核心进入 .Lpark 等待。
+    # 仅让 hart 0 执行初始化，其余核心睡眠等待
     csrr    t0, mhartid
     bnez    t0, .Lpark
 
-    # 设置临时启动栈并清零 __bss_start ~ __bss_end，
-    # 防止全局变量、进程数组与初始陷入帧残留脏数据。
-
-    # TODO: 在这里填写启动栈设置与 BSS 清零循环。
+    # 设置启动栈并清零 BSS 段
     la      sp, boot_stack_top
     la      t0, __bss_start
     la      t1, __bss_end
@@ -24,16 +28,15 @@ _start:
     addi    t0, t0, 1
     j       .Lclear_bss
 .Lbss_done:
-    # 配置 PMP 全物理地址放行权限（门禁卡）与同步异常委派 medeleg = 0xb1ff，
-    # 随后设置 MPP = 01 (S-mode) 与 mepc = supervisor_entry，执行 mret 进入 S 态。
-
-    # TODO: 在这里填写 PMP、medeleg 配置及 mret 降权逻辑。
+    # 配置 PMP 全物理地址放行与同步异常委派
     li      t0, -1
     csrw    pmpaddr0, t0
     li      t0, 0x0f
     csrw    pmpcfg0, t0
     li      t0, 0xb1ff
     csrw    medeleg, t0
+
+    # 设置 MPP=01 与 mepc 后执行 mret 降权进 S 态
     la      t0, supervisor_entry
     csrw    mepc, t0
     li      t0, 0x1800
@@ -45,10 +48,11 @@ _start:
     wfi
     j       .Lpark
 
+# S 态部门经理入口（supervisor_entry）：
+# 挂好前台门铃 stvec = trap_entry，将 sscratch 清零标记处于内核态，再调用 C 入口 kernel_main()。
+#
+# TODO: 在这里实现 S 态陷入向量配置并跳转到 kernel_main。
 supervisor_entry:
-    # 配置 S 态陷入入口 trap_entry，清零 sscratch，并跳转到 C 内核入口 kernel_main。
-
-    # TODO: 在这里填写 S 态入口初始化并调用 kernel_main。
     la      t0, trap_entry
     csrw    stvec, t0
     csrw    sscratch, zero
@@ -57,19 +61,19 @@ supervisor_entry:
     wfi
     j       .Lhalt
 
+# S 态陷入总入口（trap_entry）：
+# 1. csrrw 对调用户栈与当前员工内核栈，若换出 0 说明内核态自身重入异常（跳 .Lkernel_trap）；
+# 2. 分配 272 字节储物柜保存 x[1..31]、sepc、sstatus，并将 sscratch 清零；
+# 3. 调用 handle_trap(frame, scause, stval)，拿到调度器返回的“下一个员工”帧指针切到 sp 后走 restore_user。
+#
+# TODO: 在这里实现 272 字节陷入帧保存、调用 handle_trap 并切换到目标进程上下文。
     .align 2
 trap_entry:
-    # 原子对调用户栈与当前员工内核栈（交换办公桌）；
-    # 若换出 sp 为 0，说明内核态自身触发异常，转入 .Lkernel_trap 诊断。
-
-    # TODO: 在这里填写栈指针交换与内核重入检测指令。
+    # 对调用户栈与内核栈，检测内核重入异常
     csrrw   sp, sscratch, sp
     beqz    sp, .Lkernel_trap
 
-    # 分配 272 字节储物柜（256B 通用寄存器 + sepc + sstatus）并保存当前员工完整现场，
-    # 同时将 sscratch 清零标记正在内核态执行。
-
-    # TODO: 在这里填写 272 字节陷入帧保存逻辑。
+    # 分配 272 字节陷入帧并保存通用寄存器、用户 sp、sepc 与 sstatus
     addi    sp, sp, -272
     sd      ra, 8(sp)
     sd      gp, 24(sp)
@@ -109,18 +113,20 @@ trap_entry:
     csrr    t0, sstatus
     sd      t0, 264(sp)
 
-    # 传入 (frame=sp, cause=scause, value=stval) 调用 C 函数 handle_trap()；
-    # handle_trap 返回的 a0 为调度器选中的“下一个员工”的陷入帧地址，直接切过去恢复现场。
-
-    # TODO: 在这里填写调用 handle_trap 并切换至目标帧的指令。
+    # 传参调用 handle_trap，把返回的新进程帧地址赋给 sp 后恢复执行
     mv      a0, sp
     csrr    a1, scause
     csrr    a2, stval
     call    handle_trap
     mv      sp, a0
     j       restore_user
+
+# 内核态意外陷入处理入口（.Lkernel_trap）：
+# 换回内核 sp 后交由 C 函数 kernel_trap 打印诊断并停机。
+#
+# TODO: 在这里实现内核态异常现场恢复并调用 kernel_trap。
 .Lkernel_trap:
-    # 内核态意外陷入：换回内核 sp 后交由 C 函数 kernel_trap 打印诊断并停机。
+    # 换回内核 sp 后交由 C 函数 kernel_trap 打印诊断并停机。
     csrrw   sp, sscratch, sp
     csrw    sscratch, zero
     csrr    a0, scause
