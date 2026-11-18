@@ -1,9 +1,16 @@
 #include "kernel.h"
 
+/*
+ * S 态部门经理总管代码（kernel.c）：
+ * 在这里用 C 语言管理 2 个 U 态打工人（alpha 与 beta），包括：
+ * 独立双栈分配、进程初始化、礼让式（协作式）轮转调度与系统调用分发。
+ */
+
 #define PROCESS_COUNT 2
 #define STACK_SIZE 4096
 #define UART ((volatile unsigned char *)0x10000000UL)
 #define TEST_DEVICE (*(volatile unsigned int *)0x100000UL)
+/* 系统调用号：2=puts, 3=yield, 4=exit（未实现实验 3 的 1 号 putchar） */
 #define SYS_PUTS 2
 #define SYS_YIELD 3
 #define SYS_EXIT 4
@@ -12,12 +19,14 @@ extern void user_alpha(void);
 extern void user_beta(void);
 extern void enter_user(struct trap_frame *) __attribute__((noreturn));
 
+/* 两个员工各自独立的 4 KiB 用户栈与 4 KiB 内核栈，互不干扰 */
 static unsigned char user_stacks[PROCESS_COUNT][STACK_SIZE] __attribute__((aligned(16)));
 static unsigned char kernel_stacks[PROCESS_COUNT][STACK_SIZE] __attribute__((aligned(16)));
 static struct process processes[PROCESS_COUNT];
-static unsigned int current;
-static int failed;
+static unsigned int current;  /* 当前占有工位的进程下标（0=alpha, 1=beta） */
+static int failed;            /* 记录是否有进程以非零退出码结束 */
 
+/* 串口输出单字符：轮询 UART[5] 发送空标志位后写入 UART[0] */
 static void putchar_raw(char c)
 {
     while (!(UART[5] & 0x20)) { }
@@ -37,6 +46,7 @@ static void hex64(u64 value)
         putchar_raw(digits[(value >> shift) & 15]);
 }
 
+/* 向 QEMU virt 的 SiFive 测试设备写入退出状态（0x5555 成功，0x13333 失败） */
 static void finish(int error) __attribute__((noreturn));
 static void finish(int error)
 {
@@ -45,6 +55,7 @@ static void finish(int error)
     for (;;) __asm__ volatile ("wfi");
 }
 
+/* 内核态致命异常诊断函数（对应 start.S 的 .Lkernel_trap） */
 void kernel_trap(u64 cause, u64 pc, u64 value) __attribute__((noreturn));
 void kernel_trap(u64 cause, u64 pc, u64 value)
 {
@@ -54,6 +65,12 @@ void kernel_trap(u64 cause, u64 pc, u64 value)
     finish(1);
 }
 
+/*
+ * 办理员工入职：填写进程控制块，并在该进程内核栈顶下方预留 272 字节初始陷入帧；
+ * 由于启动汇编已将 BSS 清零，只需设定用户栈顶 x[2]、入口地址 sepc 与 sstatus=0（U 态、关中断）。
+ *
+ * TODO: 在这里完成进程初始上下文构建。
+ */
 static void init_process(unsigned int i, const char *name, void (*entry)(void))
 {
     struct process *p = &processes[i];
@@ -76,6 +93,13 @@ static void describe(const char *action, const struct process *p)
     puts_raw(" ("); puts_raw(p->name); puts_raw(")\n");
 }
 
+/*
+ * 协作式（礼让式）轮转调度器：
+ * 从当前员工下一位起绕圈扫描进程表，选中第一个处于 READY 状态的员工并返回其陷入帧指针；
+ * 若所有员工都已 EXITED 下班，则输出 PASS/FAIL 并通过 finish() 自动关闭 QEMU。
+ *
+ * TODO: 在这里实现循环扫描调度逻辑。
+ */
 static struct trap_frame *schedule(void)
 {
     /* Cooperative round robin: examine each process once, starting after current. */
@@ -93,6 +117,16 @@ static struct trap_frame *schedule(void)
     finish(failed);
 }
 
+/*
+ * 陷入总处理函数：
+ * 先保存当前进程的 context 指针，检查是否为 U 态 ecall（cause == 8），
+ * 随后将 sepc 加 4 跳过 ecall 指令，并按系统调用号 a7（x[17]）分发：
+ *   SYS_PUTS (2): 打印字符串，返回 0，不切换任务；
+ *   SYS_YIELD (3): 将当前进程置回 READY 并调用 schedule() 切到下一任务；
+ *   SYS_EXIT (4): 记录退出码，设为 EXITED 并调用 schedule()。
+ *
+ * TODO: 在这里实现系统调用分发与任务切换逻辑。
+ */
 struct trap_frame *handle_trap(struct trap_frame *frame, u64 cause, u64 value)
 {
     struct process *p = &processes[current];
@@ -126,6 +160,7 @@ struct trap_frame *handle_trap(struct trap_frame *frame, u64 cause, u64 value)
     }
 }
 
+/* C 内核入口：初始化 alpha 和 beta 两个任务，并调用 enter_user() 启动首个任务 */
 void kernel_main(void)
 {
     puts_raw("kaiwai-os lab 0-4 | Wang Yunyu | 24281239\n");

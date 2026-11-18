@@ -36,6 +36,7 @@ SECTIONS
     } :data
 
     /* Uninitialized data and stacks */
+    /* BSS 区：存放未初始化全局变量、boot 栈以及两个员工的双栈；启动汇编会先把这里全擦成 0 */
     .bss (NOLOAD) :
     {
         . = ALIGN(16);
